@@ -42,7 +42,7 @@ public:
     char nodePayload[PAYLOAD_SIZE];
     Node(char *payload, int payloadSize){
         assert(payloadSize <= PAYLOAD_SIZE);
-        memcpy(payload, nodePayload, payloadSize);
+        memcpy(nodePayload, payload, payloadSize);
         next = pack(NULL, 0);
     }
     void setNext(Node *n){
@@ -146,6 +146,7 @@ bool dequeue(Queue *q, char *response){
                 q->tail.compare_exchange_strong(cachedTail,pack(nextNode,cachedTailCounter+1)); 
             } else{
                 response = nextNode->nodePayload; // This is probably incorrect
+                printf("node payload: %s\n", nextNode->nodePayload);
                 if(q->head.compare_exchange_strong(cachedHead,pack(nextNode,cachedHeadCounter+1))){
                     break;
                 }
@@ -161,10 +162,18 @@ bool dequeue(Queue *q, char *response){
 int main() {
     Queue *q = new Queue();
     char *strPayload = static_cast<char*>(malloc(32));
+    strcpy(strPayload,"First");
+    enqueue(q, strPayload, strlen(strPayload));
+    strcpy(strPayload,"Second");
+    enqueue(q, strPayload, strlen(strPayload));
+    strcpy(strPayload,"Third");
     enqueue(q, strPayload, strlen(strPayload));
     printf("Enqueu done!\n");
     char *response;
-    dequeue(q,response);
+
+    while (dequeue(q,response))
+    {
+    }
     printf("Dequeu done!\n");
     return 0;
 }
