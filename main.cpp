@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include<jemalloc/jemalloc.h>
+#include <thread>
+#include <vector>
 
 #define PAYLOAD_SIZE 128
 constexpr uint64_t POINTER_MASK = 0x0000FFFFFFFFFFFF;  // Lower 48 bits
@@ -45,21 +47,6 @@ public:
         memcpy(nodePayload, payload, payloadSize);
         next = pack(NULL, 0);
     }
-    void setNext(Node *n){
-        uint16_t counter = unpack_counter(next);
-        counter+=1;
-        next = pack(n,counter);
-    }
-    Node *getNext(){
-        return unpack_ptr(next);
-    }
-    Pointer *getPtrNext(){
-        Node *nodePtr = unpack_ptr(next);
-        uint16_t counter = unpack_counter(next);
-        Pointer *p = new Pointer(nodePtr, counter);
-        return p;
-    }
-
 };
 
 
@@ -145,8 +132,7 @@ bool dequeue(Queue *q, char *response){
                 }
                 q->tail.compare_exchange_strong(cachedTail,pack(nextNode,cachedTailCounter+1)); 
             } else{
-                response = nextNode->nodePayload; // This is probably incorrect
-                printf("node payload: %s\n", nextNode->nodePayload);
+                memcpy(response,nextNode->nodePayload, PAYLOAD_SIZE);
                 if(q->head.compare_exchange_strong(cachedHead,pack(nextNode,cachedHeadCounter+1))){
                     break;
                 }
@@ -158,22 +144,86 @@ bool dequeue(Queue *q, char *response){
 
 }
 
+void run_tests(Queue* q){
+    
+    char buffer[PAYLOAD_SIZE];
+
+    // Test: dequeue from empty queue
+    assert(dequeue(q, buffer) == false);
+
+    // Test: enqueue one element, then dequeue
+    enqueue(q, (char*)"OnlyOne", strlen("OnlyOne"));
+    assert(dequeue(q, buffer));
+    assert(strcmp(buffer, "OnlyOne") == 0);
+    assert(dequeue(q, buffer) == false);
+
+    // Test: payload size at PAYLOAD_SIZE boundary
+    char longPayload[PAYLOAD_SIZE];
+    for (int i = 0; i < PAYLOAD_SIZE - 1; ++i)
+        longPayload[i] = 'x';
+    longPayload[PAYLOAD_SIZE - 1] = '\0';
+    enqueue(q, longPayload, strlen(longPayload));
+    assert(dequeue(q, buffer));
+    assert(strcmp(buffer, longPayload) == 0);
+
+    // Test: enqueue and dequeue 1000 elements
+    for (int i = 0; i < 1000; ++i) {
+        char msg[32];
+        sprintf(msg, "Message %d", i);
+        enqueue(q, msg, strlen(msg));
+    }
+
+    for (int i = 0; i < 1000; ++i) {
+        assert(dequeue(q, buffer));
+        char expected[32];
+        sprintf(expected, "Message %d", i);
+        assert(strcmp(buffer, expected) == 0);
+    }
+
+    assert(dequeue(q, buffer) == false);
+    printf("Functional tests passed!\n");
+}
+
+void threaded_test(Queue* q) {
+    const int N = 100000;
+    const int THREADS = 30;
+    std::atomic<uint64_t> receivedCount;
+    receivedCount = 0;
+    // Launch producer threads
+    std::vector<std::thread> producers;
+    for (int t = 0; t < THREADS; ++t) {
+        producers.emplace_back([=]() {
+            for (int i = 0; i < N; ++i) {
+                char msg[64];
+                sprintf(msg, "Thread %d Msg %d", t, i);
+                enqueue(q, msg, strlen(msg));
+            }
+        });
+    }
+
+    // Launch consumer thread
+
+    std::thread consumer([&]() {
+        char buffer[PAYLOAD_SIZE];
+        while (receivedCount < N * THREADS) {
+            if (dequeue(q, buffer)) {
+                receivedCount++;
+                // Optionally verify content
+            }
+        }
+    });
+
+    for (auto& p : producers) p.join();
+    consumer.join();
+    char buffer[PAYLOAD_SIZE];
+    assert(receivedCount == N * THREADS);
+    assert(!dequeue(q,buffer));
+    printf("Multi-threaded test passed!\n");
+}
 
 int main() {
     Queue *q = new Queue();
-    char *strPayload = static_cast<char*>(malloc(32));
-    strcpy(strPayload,"First");
-    enqueue(q, strPayload, strlen(strPayload));
-    strcpy(strPayload,"Second");
-    enqueue(q, strPayload, strlen(strPayload));
-    strcpy(strPayload,"Third");
-    enqueue(q, strPayload, strlen(strPayload));
-    printf("Enqueu done!\n");
-    char *response;
-
-    while (dequeue(q,response))
-    {
-    }
-    printf("Dequeu done!\n");
+    run_tests(q);
+    threaded_test(q);
     return 0;
 }
