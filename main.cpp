@@ -36,11 +36,10 @@ uint16_t counter;
 
 
 class Node{
-private:
-    char nodePayload[PAYLOAD_SIZE];
-    
+
 public:
     std::atomic<uint64_t> next;
+    char nodePayload[PAYLOAD_SIZE];
     Node(char *payload, int payloadSize){
         assert(payloadSize <= PAYLOAD_SIZE);
         memcpy(payload, nodePayload, payloadSize);
@@ -123,10 +122,49 @@ void enqueue(Queue *q, char *payload, int payloadSize){
 
 }
 
+bool dequeue(Queue *q, char *response){
+    Node *cachedHeadPointer;
+    while (true)
+    {
+        uint64_t cachedHead = q->head;
+        uint64_t cachedTail = q->tail;
+
+        cachedHeadPointer = unpack_ptr(cachedHead);
+        Node *cachedTailPointer = unpack_ptr(cachedTail);
+
+        uint64_t packedNext =  cachedHeadPointer->next;
+        Node *nextNode = unpack_ptr(packedNext);
+
+        uint64_t cachedTailCounter = unpack_counter(cachedTail);
+        uint64_t cachedHeadCounter = unpack_counter(cachedHead);
+
+        if(cachedHead == q->head){
+            if(cachedHeadPointer == cachedTailPointer){
+                if(nextNode == NULL){
+                    return false;
+                }
+                q->tail.compare_exchange_strong(cachedTail,pack(nextNode,cachedTailCounter+1)); 
+            } else{
+                response = nextNode->nodePayload; // This is probably incorrect
+                if(q->head.compare_exchange_strong(cachedHead,pack(nextNode,cachedHeadCounter+1))){
+                    break;
+                }
+            }
+        }
+    }
+    delete cachedHeadPointer;
+    return true;
+
+}
+
 
 int main() {
     Queue *q = new Queue();
-
+    char *strPayload = static_cast<char*>(malloc(32));
+    enqueue(q, strPayload, strlen(strPayload));
     printf("Enqueu done!\n");
+    char *response;
+    dequeue(q,response);
+    printf("Dequeu done!\n");
     return 0;
 }
