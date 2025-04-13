@@ -5,62 +5,8 @@
 #include<jemalloc/jemalloc.h>
 #include <thread>
 #include <vector>
+#include "benchmark.hpp"
 
-#define PAYLOAD_SIZE 128
-constexpr uint64_t POINTER_MASK = 0x0000FFFFFFFFFFFF;  // Lower 48 bits
-constexpr uint64_t COUNTER_MASK = 0xFFFF000000000000;  // Upper 16 bits
-
-class Node;
-uint64_t pack(Node* ptr, uint16_t counter);
-Node* unpack_ptr(uint64_t packed);
-uint16_t unpack_counter(uint64_t packed);
-
-class Pointer{
-public:
-Node *ptr;
-uint16_t counter;
-
-
-    Pointer(Node *ptr, int counter){
-       this->ptr = ptr;
-       this->counter = counter;
-    }
-    bool operator==(const Pointer& other) const {
-        return ptr == other.ptr && counter == other.counter;
-    }
-    void setPointer(Node *ptr) const{
-        ptr = reinterpret_cast<Node*>(reinterpret_cast<uint64_t>(ptr) & POINTER_MASK);
-    }
-    void setCounter(uint16_t newValue) const{
-        
-    }
-};
-
-
-class Node{
-
-public:
-    std::atomic<uint64_t> next;
-    char nodePayload[PAYLOAD_SIZE];
-    Node(char *payload, int payloadSize){
-        assert(payloadSize <= PAYLOAD_SIZE);
-        memcpy(nodePayload, payload, payloadSize);
-        next = pack(NULL, 0);
-    }
-};
-
-
-class Queue{
-public:
-    std::atomic<uint64_t> head; // This is actually a packed Pointer
-    std::atomic<uint64_t> tail;
-
-    Queue(){
-        Node *node = new Node("", strlen(""));
-        uint64_t nodePtr = pack(node,0);
-        head = tail = nodePtr;
-    }
-};
 
 
 uint64_t pack(Node* ptr, uint16_t counter) {
@@ -132,7 +78,9 @@ bool dequeue(Queue *q, char *response){
                 }
                 q->tail.compare_exchange_strong(cachedTail,pack(nextNode,cachedTailCounter+1)); 
             } else{
+#ifdef RETRUN_RESULT_FOR_DEQUEUE
                 memcpy(response,nextNode->nodePayload, PAYLOAD_SIZE);
+#endif
                 if(q->head.compare_exchange_strong(cachedHead,pack(nextNode,cachedHeadCounter+1))){
                     break;
                 }
@@ -223,7 +171,9 @@ void threaded_test(Queue* q) {
 
 int main() {
     Queue *q = new Queue();
-    run_tests(q);
-    threaded_test(q);
+    //run_tests(q);
+    //threaded_test(q);
+
+    //benchmark_queue(30, 1000000, q);
     return 0;
 }
